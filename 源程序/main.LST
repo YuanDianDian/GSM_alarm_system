@@ -1,0 +1,310 @@
+C51 COMPILER V9.56.0.0   MAIN                                                              01/13/2017 21:39:47 PAGE 1   
+
+
+C51 COMPILER V9.56.0.0, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN main.OBJ
+COMPILER INVOKED BY: D:\Program Files (x86)\MDK5\C51\BIN\C51.EXE main.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND TABS
+                    -(2)
+
+line level    source
+
+   1          #include "main.h"
+   2          #include "uart.h"
+   3          #include "LCD12864_S.h"
+   4          #include "DS18B20.h"
+   5          
+   6          
+   7          
+   8          //常量
+   9          #define Success 1U
+  10          #define Failure 0U
+  11          
+  12          code char phoneNumber[] = "15934827892";    //替换成需要被拨打电话的号码
+  13          char msg[20] = "HIGH TEMP:00";    //短信内容
+  14          
+  15          
+  16          #define TEMP_MAX 30
+  17          #define CO_MAX 30
+  18          
+  19          //定义变量
+  20          unsigned long  Time_Cont = 0;       //定时器计数器
+  21          
+  22          unsigned char state = 0;
+  23          unsigned char state_pre = 0;
+  24          
+  25          unsigned int Temp_Buffer = 0;
+  26          unsigned char key_num = 0;
+  27          bit flag_sw = 1;
+  28          unsigned int ADC_Buffer = 0;  
+  29          
+  30          void main()
+  31          {
+  32   1        ADC_CONTR = ADC_360T | ADC_ON;
+  33   1        AUXR1 |= ADRJ;                  //ADRJ = 1;     //10bitAD右对齐
+  34   1      
+  35   1        Uart_Init();
+  36   1      
+  37   1        LcmInit();                //液晶初始化
+  38   1        LcmClearTXT();              //清除显示
+  39   1        LcmClearBMP();
+  40   1        delay_ms(100);
+  41   1        PutStr(0,0,"。。初始化中。。"); 
+  42   1      
+  43   1      
+  44   1        if (sendCommand("AT\r\n", "OK\r\n", 3000, 10) == Success);
+  45   1        else errorLog();
+  46   1        delay_ms(10);
+  47   1      
+  48   1        if (sendCommand("AT+CPIN?\r\n", "READY", 1000, 10) == Success);
+  49   1        else errorLog();
+  50   1        delay_ms(10);
+  51   1      
+  52   1        if (sendCommand("AT+CREG?\r\n", "CREG: 1", 1000, 10) == Success);
+  53   1        else errorLog();
+  54   1        delay_ms(10);
+C51 COMPILER V9.56.0.0   MAIN                                                              01/13/2017 21:39:47 PAGE 2   
+
+  55   1      
+  56   1        if (sendCommand("AT+CMGF=1\r\n", "OK\r\n", 1000, 10) == Success);
+  57   1        else errorLog();
+  58   1        delay_ms(10);
+  59   1      
+  60   1        if (sendCommand("AT+CSCS=\"GSM\"\r\n", "OK\r\n", 1000, 10) == Success);
+  61   1        else errorLog();
+  62   1        delay_ms(10);
+  63   1      
+  64   1        Temp_Buffer = Get_temp();
+  65   1        delay_ms(1000);
+  66   1        LcmClearTXT();              //清除显示
+  67   1      
+  68   1        while(1)
+  69   1        { 
+  70   2          Temp_Buffer = Get_temp();
+  71   2          PutStr(0,0,"温度："); 
+  72   2        
+  73   2          if( Temp_Buffer/1000 != 0 )         //如果第一位为0，忽略显示
+  74   2          {
+  75   3            WriteData(Temp_Buffer/1000+0X30);    //显示温度百位值
+  76   3          }
+  77   2          else
+  78   2          {
+  79   3            if(flag_temper == 1)            //根据温度标志位显示温度正负
+  80   3            {
+  81   4              WriteData('-');
+  82   4            }
+  83   3            else
+  84   3            {
+  85   4              WriteData(' '); 
+  86   4            }    
+  87   3          }
+  88   2            
+  89   2          WriteData(Temp_Buffer%1000/100+0X30);    //显示温度十位值
+  90   2          WriteData(Temp_Buffer%100/10+0X30);    //显示温度个位值
+  91   2          WriteData('.');              //显示小数点
+  92   2          WriteData(Temp_Buffer%10+0X30);      //显示温度十分位值
+  93   2          WriteData(' ');
+  94   2          PutStr(0,7,"℃");
+  95   2      
+  96   2          if(flag_temper == 0)
+  97   2          {
+  98   3            if(Temp_Buffer/10 >= TEMP_MAX)
+  99   3            {
+ 100   4              state = 1;
+ 101   4              PutStr(1,0,"温度超标");       
+ 102   4            }
+ 103   3            else
+ 104   3            {
+ 105   4              state = 0;
+ 106   4              PutStr(1,0,"温度合适");
+ 107   4            }
+ 108   3      
+ 109   3            if(Temp_Buffer/10 <= TEMP_MAX - 1)  //低于报警值1度后发送短信功能才复位，防止不停的发短信
+ 110   3            {
+ 111   4              state_pre = 0;
+ 112   4            }
+ 113   3          }
+ 114   2      
+ 115   2          if(state == 1&& state_pre == 0)
+ 116   2          {
+C51 COMPILER V9.56.0.0   MAIN                                                              01/13/2017 21:39:47 PAGE 3   
+
+ 117   3            memset(msg,0,20);       //短信语句
+ 118   3            sprintf(msg,"HIGH TEMP:  %d",Temp_Buffer/10);
+ 119   3            sendMessage(phoneNumber,msg);   //发送短信
+ 120   3            state_pre = state;  
+ 121   3          }
+ 122   2          ADC_Buffer = adc10_start(0);    // P1.0 ADC
+ 123   2          PutStr(2,0,"CO浓度："); 
+ 124   2          ADC_Buffer = ADC_Buffer*100/1024;
+ 125   2          WriteData(ADC_Buffer%100/10+0X30);
+ 126   2          WriteData(ADC_Buffer%10+0X30);
+ 127   2            if(ADC_Buffer >= CO_MAX)
+ 128   2            {
+ 129   3              state = 1;
+ 130   3              PutStr(3,0,"CO浓度超标");
+ 131   3            }
+ 132   2            else
+ 133   2            {
+ 134   3              state = 0;
+ 135   3              PutStr(3,0,"CO浓度合适");
+ 136   3            }
+ 137   2      
+ 138   2            if(Temp_Buffer/10 <= TEMP_MAX - 1)  //低于报警值1度后发送短信功能才复位，防止不停的发短信
+ 139   2            {
+ 140   3              state_pre = 0;
+ 141   3            }
+ 142   2          
+ 143   2            if(state == 1&& state_pre == 0)
+ 144   2          {
+ 145   3            memset(msg,0,20);       //短信语句
+ 146   3            sprintf(msg,"HIGH CO:  %d",ADC_Buffer);
+ 147   3            sendMessage(phoneNumber,msg
+ 148   3            );    //发送短信
+ 149   3            state_pre = state;  
+ 150   3          }   
+ 151   2          delay_ms(500);
+ 152   2      
+ 153   2        }
+ 154   1      }
+ 155          
+ 156          
+ 157          //****************************************************
+ 158          //做一次ADC转换
+ 159          //****************************************************
+ 160          unsigned int adc10_start(unsigned char channel) //channel = 0~7
+ 161          {
+ 162   1        unsigned int  adc;
+ 163   1        unsigned char i;
+ 164   1      
+ 165   1        P1ASF = (1 << channel);     //12C5A60AD/S2系列模拟输入(AD)选择
+ 166   1      
+ 167   1        ADC_RES = 0;
+ 168   1        ADC_RESL = 0;
+ 169   1      
+ 170   1        ADC_CONTR = (ADC_CONTR & 0xe0) | ADC_START | channel;
+ 171   1        _nop_();
+ 172   1        _nop_();
+ 173   1        _nop_();
+ 174   1        _nop_();
+ 175   1         
+ 176   1      
+ 177   1      //  for(i=0; i<250; i++)    //13T/loop, 40*13=520T=23.5us @ 22.1184M
+ 178   1        i = 250;
+C51 COMPILER V9.56.0.0   MAIN                                                              01/13/2017 21:39:47 PAGE 4   
+
+ 179   1        do{
+ 180   2          if(ADC_CONTR & ADC_FLAG)
+ 181   2          {
+ 182   3            ADC_CONTR &= ~ADC_FLAG;       //软件清零ADC_FLAG
+ 183   3            _nop_();
+ 184   3            _nop_();
+ 185   3            _nop_();
+ 186   3            _nop_();
+ 187   3            adc = 0;
+ 188   3            adc = (ADC_RES << 8) | ADC_RESL;  //ADRJ_enable()
+ 189   3      
+ 190   3      
+ 191   3            return  adc;
+ 192   3          }
+ 193   2        }while(--i);
+ 194   1        return  1024;
+ 195   1      }
+ 196          
+ 197          void sendMessage(char *number,char *msg)
+ 198          {
+ 199   1        xdata char send_buf[20] = {0};
+ 200   1        memset(send_buf, 0, 20);    //清空
+ 201   1        strcpy(send_buf, "AT+CMGS=\"");
+ 202   1        strcat(send_buf, number);
+ 203   1        strcat(send_buf, "\"\r\n");
+ 204   1        if (sendCommand(send_buf, ">", 3000, 10) == Success);
+ 205   1        else errorLog();
+ 206   1      
+ 207   1        SendString(msg);
+ 208   1      
+ 209   1        SendData(0x1A);
+ 210   1      }
+ 211          
+ 212          void phone(char *number)
+ 213          {
+ 214   1        char send_buf[20] = {0};
+ 215   1        memset(send_buf, 0, 20);    //清空
+ 216   1        strcpy(send_buf, "ATD");
+ 217   1        strcat(send_buf, number);
+ 218   1        strcat(send_buf, ";\r\n");
+ 219   1      
+ 220   1        if (sendCommand(send_buf, "SOUNDER", 10000, 10) == Success);
+ 221   1        else errorLog();
+ 222   1      }
+ 223          
+ 224          void errorLog()
+ 225          {
+ 226   1        while (1)
+ 227   1        {
+ 228   2            if (sendCommand("AT\r\n", "OK", 100, 10) == Success)
+ 229   2          {
+ 230   3            soft_reset();
+ 231   3          }
+ 232   2          delay_ms(200);
+ 233   2        }
+ 234   1      }
+ 235          
+ 236          void soft_reset(void)  //制造重启命令
+ 237          {
+ 238   1         ((void (code *) (void)) 0x0000) ();
+ 239   1      }
+ 240          
+C51 COMPILER V9.56.0.0   MAIN                                                              01/13/2017 21:39:47 PAGE 5   
+
+ 241          unsigned int sendCommand(char *Command, char *Response, unsigned long Timeout, unsigned char Retry)
+ 242          {
+ 243   1        unsigned char n;
+ 244   1        CLR_Buf();
+ 245   1        for (n = 0; n < Retry; n++)
+ 246   1        {
+ 247   2          SendString(Command);    //发送GPRS指令
+ 248   2      
+ 249   2          Time_Cont = 0;
+ 250   2          while (Time_Cont < Timeout)
+ 251   2          {
+ 252   3            delay_ms(100);
+ 253   3            Time_Cont += 100;
+ 254   3            if (strstr(Rec_Buf, Response) != NULL)
+ 255   3            {
+ 256   4              
+ 257   4              CLR_Buf();
+ 258   4              return Success;
+ 259   4            }
+ 260   3            
+ 261   3          }
+ 262   2          Time_Cont = 0;
+ 263   2        }
+ 264   1        
+ 265   1        CLR_Buf();
+ 266   1        return Failure;
+ 267   1      }
+ 268          
+ 269          //****************************************************
+ 270          //MS延时函数(12M晶振下测试)
+ 271          //****************************************************
+ 272          void delay_ms(unsigned int n)
+ 273          {
+ 274   1        unsigned int  i,j,m;
+ 275   1        for(m = 0 ; m < 10 ; m++)
+ 276   1          for(i=0;i<n;i++)
+ 277   1            for(j=0;j<123;j++);
+ 278   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1354    ----
+   CONSTANT SIZE    =    265    ----
+   XDATA SIZE       =   ----      20
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     31      41
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      1    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
